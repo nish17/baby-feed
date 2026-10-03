@@ -209,7 +209,7 @@ This is directional scope, not a constraint — adjust package/file names as imp
 
 ## Implementation Units
 
-- [ ] **Unit 1: Project Scaffolding & Local Data Layer**
+- [x] **Unit 1: Project Scaffolding & Local Data Layer**
 
 **Goal:** Stand up the Android project (Gradle, Kotlin, `minSdk 31`, Room) and the persistence layer everything else depends on.
 
