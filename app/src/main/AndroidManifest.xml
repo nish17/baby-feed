@@ -26,6 +26,11 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".history.HistoryActivity"
+            android:exported="false"
+            android:label="History" />
+
         <receiver
             android:name=".widget.FeedWidgetReceiver"
             android:exported="true">

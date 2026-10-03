@@ -1,6 +1,7 @@
 package com.snimesh.baby_feed.backdate
 
 import android.Manifest
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -23,7 +24,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.snimesh.baby_feed.history.HistoryActivity
 import com.snimesh.baby_feed.ui.theme.BabyfeedTheme
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -54,6 +57,7 @@ class BackdateActivity : ComponentActivity() {
 
 @Composable
 private fun BackdateScreen(viewModel: BackdateViewModel, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsState()
     var typedText by remember { mutableStateOf("") }
 
@@ -84,7 +88,10 @@ private fun BackdateScreen(viewModel: BackdateViewModel, modifier: Modifier = Mo
                 Button(onClick = { viewModel.onManualEntryClicked() }) {
                     Text("Enter manually")
                 }
-                // TODO(Units 5/6): navigate to HistoryActivity/SettingsActivity once they exist.
+                Button(onClick = { context.startActivity(Intent(context, HistoryActivity::class.java)) }) {
+                    Text("History")
+                }
+                // TODO(Unit 6): navigate to SettingsActivity once it exists.
             }
 
             is BackdateUiState.Listening -> Text("Listening…")

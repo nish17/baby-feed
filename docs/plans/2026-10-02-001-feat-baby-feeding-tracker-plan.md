@@ -91,6 +91,8 @@ None — this repository is currently empty aside from `docs/brainstorms/` and `
 - **Non-ViewModel call sites (`LogNowAction`, `WidgetRefreshWorker`) access `FeedRepository` via a lazy singleton accessor keyed on `applicationContext`**, consistent with the "no DI framework" decision above — this is the concrete mechanism behind that decision, not a separate one.
 - **`FeedRepository` is an interface (`RoomFeedRepository` is the real impl)**: implemented during Unit 1, retrofitted to an interface once Unit 2 needed `FakeFeedRepository` for `WidgetActionHandlerTest` — matches the fakeable-interface pattern the plan already specifies for `SpeechCaptureController`/`TimeParsingLlm` in Units 3-4.
 - **`WidgetActionHandler` holds only repository logic; `LogNowAction`/`UndoLogAction` own the Glance-specific side effects** (`updateAppWidgetState`, `updateAll`): this split is what makes `WidgetActionHandlerTest` a plain JVM test — the Glance state/redraw calls need a real Android/Glance runtime and aren't unit-tested here, consistent with the plan's own note that Glance's testing API doesn't cover real rendering or taps.
+- **History's edit action is a quick "-15m" adjustment button, not a full date/time picker dialog** — same philosophy as the backdating `ManualPicker`'s relative-offset buttons (Unit 3/4): the realistic correction case is "it was logged a bit earlier than it should have been," and a native `DatePickerDialog`/`TimePickerDialog` would need extra View-interop ceremony disproportionate to weekend scope.
+- **ViewModels catch and silently reject a future-timestamp edit/log rather than letting `IllegalArgumentException` propagate**: discovered as a real bug during Unit 5 — the exception is thrown inside a `viewModelScope.launch` coroutine, so a caller's `try/catch` around the ViewModel method call never actually catches it; the ViewModel itself must handle it.
 
 ## High-Level Technical Design
 
@@ -380,7 +382,7 @@ This is directional scope, not a constraint — adjust package/file names as imp
 
 ---
 
-- [ ] **Unit 5: History List — Edit & Delete**
+- [x] **Unit 5: History List — Edit & Delete**
 
 **Goal:** A simple screen to view, edit, and delete past entries — the correction mechanism for anything the widget/backdating flow got wrong, and the main item droppable under time pressure per the Priority Order. Unit 2's undo affordance covers the dominant mis-tap case, but **not** the case of noticing later that a confirmed backdated entry (R3) was parsed or picked wrong (e.g., AM/PM mixed up) — if this unit is cut, that specific gap is an accepted, documented weekend-scope tradeoff (see Risks & Dependencies), not an oversight.
 
