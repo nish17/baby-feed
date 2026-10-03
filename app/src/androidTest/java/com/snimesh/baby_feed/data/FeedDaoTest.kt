@@ -86,4 +86,46 @@ class FeedDaoTest {
         val newMostRecent = repository.mostRecent()
         assertEquals(earlier, newMostRecent?.timestampMillis)
     }
+
+    @Test
+    fun updateFeed_withValidPastTimestamp_persists() = runTest {
+        val now = 10_000_000L
+        repository.logFeed(timestampMillis = now - 60_000L, nowMillis = now)
+        val entry = repository.mostRecent()!!
+
+        repository.updateFeed(entry.copy(timestampMillis = now - 30_000L), nowMillis = now)
+
+        assertEquals(now - 30_000L, repository.mostRecent()?.timestampMillis)
+    }
+
+    @Test
+    fun updateFeed_withFutureTimestamp_isRejectedAndLeavesOriginalUnchanged() = runTest {
+        val now = 10_000_000L
+        repository.logFeed(timestampMillis = now - 60_000L, nowMillis = now)
+        val entry = repository.mostRecent()!!
+
+        try {
+            repository.updateFeed(entry.copy(timestampMillis = now + 60_000L), nowMillis = now)
+            error("Expected updateFeed to reject a future timestamp")
+        } catch (expected: IllegalArgumentException) {
+            // expected
+        }
+
+        assertEquals(now - 60_000L, repository.mostRecent()?.timestampMillis)
+    }
+
+    @Test
+    fun getById_returnsTheMatchingEntry() = runTest {
+        val now = 10_000_000L
+        val entryId = repository.logFeed(timestampMillis = now, nowMillis = now)
+
+        val found = repository.getById(entryId)
+
+        assertEquals(now, found?.timestampMillis)
+    }
+
+    @Test
+    fun getById_withUnknownId_returnsNull() = runTest {
+        assertNull(repository.getById(999L))
+    }
 }

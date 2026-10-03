@@ -58,9 +58,15 @@ class BackdateViewModel(
 
     fun onConfirm(timestampMillis: Long) {
         viewModelScope.launch {
-            val now = System.currentTimeMillis()
-            repository.logFeed(timestampMillis = timestampMillis, nowMillis = now)
-            onEntrySaved()
+            try {
+                val now = System.currentTimeMillis()
+                repository.logFeed(timestampMillis = timestampMillis, nowMillis = now)
+                onEntrySaved()
+            } catch (rejected: IllegalArgumentException) {
+                // A backward clock step between picker-open and confirm time could flip the
+                // "not in the future" check; same silent-reject convention as HistoryViewModel
+                // rather than letting it crash (found by code review).
+            }
             _uiState.value = BackdateUiState.Idle
         }
     }

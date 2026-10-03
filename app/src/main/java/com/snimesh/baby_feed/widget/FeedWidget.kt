@@ -29,7 +29,11 @@ class FeedWidget : GlanceAppWidget() {
 
         provideContent {
             val prefs = currentState<Preferences>()
-            val justLoggedUndo = prefs[WidgetActionHandler.JUST_LOGGED_UNDO] ?: false
+            val loggedAt = prefs[WidgetActionHandler.LAST_LOGGED_AT_MILLIS]
+            // Self-heals even if ClearUndoWorker never runs (e.g. killed by Doze): the undo
+            // affordance is only ever "active" within the window, computed fresh on every render.
+            val justLoggedUndo = loggedAt != null &&
+                (System.currentTimeMillis() - loggedAt) < WidgetActionHandler.UNDO_WINDOW_MILLIS
             WidgetContent(
                 state = WidgetUiState(status = status, justLoggedUndo = justLoggedUndo),
                 onLogClick = actionRunCallback<LogNowAction>(),

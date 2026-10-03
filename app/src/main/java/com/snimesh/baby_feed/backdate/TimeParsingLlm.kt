@@ -3,6 +3,8 @@ package com.snimesh.baby_feed.backdate
 import android.content.Context
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -19,22 +21,41 @@ interface TimeParsingLlm {
  * on first use and kept warm — reloading it per call would add several seconds of latency every
  * single time. The model is expected at MODEL_PATH, pushed there via `adb push` (see the plan's
  * Key Technical Decisions) rather than bundled in the APK.
+ *
+ * The whole point of this class is "never throws, fails closed to the manual picker" — both the
+ * lazy model-load and generateResponse() are wrapped so a corrupt model, OOM, or native/JNI
+ * failure degrades to ModelUnavailable instead of crashing the app (found by code review: the
+ * original version only guarded the "file missing" case).
  */
 class MediaPipeTimeParsingLlm(private val context: Context) : TimeParsingLlm {
 
     @Volatile
     private var llmInference: LlmInference? = null
+    private val loadMutex = Mutex()
 
     override suspend fun parse(text: String, nowMillis: Long): TimeParseResult =
         withContext(Dispatchers.IO) {
             if (!File(MODEL_PATH).exists()) {
                 return@withContext TimeParseResult.ModelUnavailable
             }
-            val llm = llmInference ?: loadModel().also { llmInference = it }
+            try {
+                val llm = getOrLoadModel()
+                val prompt = buildPrompt(nowFormatted = formatPromptTimestamp(nowMillis), capturedText = text)
+                val response = llm.generateResponse(prompt)
+                parseModelResponse(response, nowMillis)
+            } catch (e: Throwable) {
+                // Throwable, not Exception: loading a ~529MB native model can throw
+                // OutOfMemoryError, which extends Error, not Exception. The explicit contract
+                // here is "never crash" -- a native/JNI failure degrading to the manual picker
+                // is strictly better than letting any kind of failure propagate.
+                TimeParseResult.ModelUnavailable
+            }
+        }
 
-            val prompt = buildPrompt(nowFormatted = formatPromptTimestamp(nowMillis), capturedText = text)
-            val response = llm.generateResponse(prompt)
-            parseModelResponse(response, nowMillis)
+    /** Mutex-guarded so two concurrent parse() calls can't both load the ~529MB model at once. */
+    private suspend fun getOrLoadModel(): LlmInference =
+        llmInference ?: loadMutex.withLock {
+            llmInference ?: loadModel().also { llmInference = it }
         }
 
     private fun loadModel(): LlmInference {

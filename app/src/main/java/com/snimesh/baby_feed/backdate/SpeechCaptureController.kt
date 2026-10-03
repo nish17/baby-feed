@@ -10,6 +10,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 
 sealed class SpeechCaptureResult {
     data class Transcribed(val text: String) : SpeechCaptureResult()
@@ -44,45 +45,59 @@ class AndroidSpeechCaptureController(private val context: Context) : SpeechCaptu
             return SpeechCaptureResult.Unavailable
         }
 
-        val recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        val recognizer = try {
+            SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+        } catch (e: Exception) {
+            return SpeechCaptureResult.RecognitionError
+        }
+
         try {
-            return suspendCancellableCoroutine { continuation ->
-                recognizer.setRecognitionListener(object : RecognitionListener {
-                    override fun onResults(results: Bundle) {
-                        val text = results
-                            .getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                            ?.firstOrNull()
-                        val result = if (text != null) {
-                            SpeechCaptureResult.Transcribed(text)
-                        } else {
-                            SpeechCaptureResult.RecognitionError
+            // If the recognizer never calls back at all (observed on some OEM builds), fail
+            // closed to the manual picker rather than leaving the UI stuck on "Listening…"
+            // forever (found by code review).
+            return withTimeoutOrNull(LISTEN_TIMEOUT_MILLIS) {
+                suspendCancellableCoroutine { continuation ->
+                    recognizer.setRecognitionListener(object : RecognitionListener {
+                        override fun onResults(results: Bundle) {
+                            val text = results
+                                .getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                                ?.firstOrNull()
+                            val result = if (text != null) {
+                                SpeechCaptureResult.Transcribed(text)
+                            } else {
+                                SpeechCaptureResult.RecognitionError
+                            }
+                            if (continuation.isActive) continuation.resumeWith(Result.success(result))
                         }
-                        if (continuation.isActive) continuation.resumeWith(Result.success(result))
-                    }
 
-                    override fun onError(error: Int) {
-                        if (continuation.isActive) {
-                            continuation.resumeWith(Result.success(SpeechCaptureResult.RecognitionError))
+                        override fun onError(error: Int) {
+                            if (continuation.isActive) {
+                                continuation.resumeWith(Result.success(SpeechCaptureResult.RecognitionError))
+                            }
                         }
+
+                        override fun onReadyForSpeech(params: Bundle?) = Unit
+                        override fun onBeginningOfSpeech() = Unit
+                        override fun onRmsChanged(rmsdB: Float) = Unit
+                        override fun onBufferReceived(buffer: ByteArray?) = Unit
+                        override fun onEndOfSpeech() = Unit
+                        override fun onPartialResults(partialResults: Bundle?) = Unit
+                        override fun onEvent(eventType: Int, params: Bundle?) = Unit
+                    })
+
+                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                        putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
                     }
-
-                    override fun onReadyForSpeech(params: Bundle?) = Unit
-                    override fun onBeginningOfSpeech() = Unit
-                    override fun onRmsChanged(rmsdB: Float) = Unit
-                    override fun onBufferReceived(buffer: ByteArray?) = Unit
-                    override fun onEndOfSpeech() = Unit
-                    override fun onPartialResults(partialResults: Bundle?) = Unit
-                    override fun onEvent(eventType: Int, params: Bundle?) = Unit
-                })
-
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
+                    recognizer.startListening(intent)
                 }
-                recognizer.startListening(intent)
-            }
+            } ?: SpeechCaptureResult.RecognitionError
         } finally {
             recognizer.destroy()
         }
+    }
+
+    companion object {
+        private const val LISTEN_TIMEOUT_MILLIS = 15_000L
     }
 }

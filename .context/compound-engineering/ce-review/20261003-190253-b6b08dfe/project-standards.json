@@ -1,0 +1,8 @@
+{
+  "reviewer": "project-standards",
+  "findings": [],
+  "residual_risks": [
+    "No CLAUDE.md or AGENTS.md standards files exist anywhere in this repository (confirmed via repo-wide search for both filenames). There are no written project standards to audit this diff against, so no compliance findings can be produced. If the project intends to enforce conventions (e.g. around skill/agent frontmatter, reference-file inclusion style, tool selection, or naming) for this Android codebase, those rules should be documented in a CLAUDE.md or AGENTS.md file so future changes can be checked against them."
+  ],
+  "testing_gaps": []
+}

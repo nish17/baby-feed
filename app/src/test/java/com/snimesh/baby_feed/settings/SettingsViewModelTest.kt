@@ -37,6 +37,16 @@ class SettingsViewModelTest {
     }
 
     @Test
+    fun construction_hydratesFromAPreExistingStoredInterval() = runTest {
+        val fourHours = TimeUnit.HOURS.toMillis(4)
+        val repository = FakeSettingsRepository(intervalMillis = fourHours)
+
+        val viewModel = SettingsViewModel(repository)
+
+        assertEquals(fourHours, viewModel.intervalMillis.value)
+    }
+
+    @Test
     fun changingInterval_triggersWidgetRedraw() = runTest {
         var redrawTriggered = false
         val viewModel = SettingsViewModel(

@@ -1,0 +1,41 @@
+{
+  "reviewer": "maintainability",
+  "findings": [
+    {
+      "title": "FeedWidget reaches directly into the settings package, contradicting the plan's own package-boundary rule",
+      "why_it_matters": "The plan's High-Level Technical Design states the architecture explicitly: 'A single data package ... has zero outbound dependencies — every other package depends only on it, never on each other' (widget/backdate/history/settings all point only to data/). FeedWidget.kt violates that by importing and calling SettingsRepository.getInstance(context) directly inside provideGlance(). This isn't fatal, but it means the one place a future maintainer goes to understand the dependency graph (the plan doc) is now wrong, and the widget's render path is coupled to a second feature package's storage implementation instead of going through a single hub. If settings' storage mechanism changes (e.g. moves off SharedPreferences, adds async initialization, or needs a migration), FeedWidget's render path is directly affected even though 'widget' and 'settings' are supposed to be independent per the stated design.",
+      "evidence": "app/src/main/java/com/snimesh/baby_feed/widget/FeedWidget.kt:14 (`import com.snimesh.baby_feed.settings.SettingsRepository`) and :22 (`val settingsRepository = SettingsRepository.getInstance(context)`), vs. docs/plans/2026-10-02-001-feat-baby-feeding-tracker-plan.md:102-109 ('every other package depends only on it, never on each other').",
+      "severity": "low",
+      "file": "app/src/main/java/com/snimesh/baby_feed/widget/FeedWidget.kt",
+      "line": 22,
+      "confidence": 0.62,
+      "autofix_class": "manual",
+      "owner": "domain",
+      "requires_verification": false,
+      "pre_existing": false,
+      "suggested_fix": "Either update the plan's stated architecture to acknowledge widget -> settings as a sanctioned second dependency (matching reality), or route the interval read through the data package (e.g. have FeedRepository/NextFeedingCalculator's caller supply the interval, with FeedWidgetReceiver/FeedWidget composing both repositories at the edge) so the documented single-hub model stays accurate for future maintainers."
+    },
+    {
+      "title": "OnDeviceSttAvailabilityTest is a committed no-op probe with zero assertions",
+      "why_it_matters": "The class's own doc comment admits it: 'Not a real test — a one-off probe ... Logs the result; does not assert.' Its purpose (verifying isOnDeviceRecognitionAvailable() on the dev device before writing Unit 3) has already been served — the plan's Open Questions section records the answer as resolved ('verified via a logcat probe before writing the rest of Unit 3'). Left in the androidTest suite, it will run forever as part of CI/instrumented test runs, always 'pass' regardless of what it logs, and give a false sense of coverage to anyone scanning test names for backdate/STT behavior. It's maintenance cost (a test file that must still compile and run) with zero ability to ever fail or catch a regression.",
+      "evidence": "app/src/androidTest/java/com/snimesh/baby_feed/backdate/OnDeviceSttAvailabilityTest.kt:1-25 — only a Log.i call, no assertions, with a comment explicitly stating it is not a real test.",
+      "severity": "low",
+      "file": "app/src/androidTest/java/com/snimesh/baby_feed/backdate/OnDeviceSttAvailabilityTest.kt",
+      "line": 20,
+      "confidence": 0.6,
+      "autofix_class": "safe_auto",
+      "owner": "domain",
+      "requires_verification": false,
+      "pre_existing": false,
+      "suggested_fix": "Delete the file now that the question it was probing is resolved and recorded in the plan doc's Open Questions section; if the probe result needs to be reproducible later, keep the one-line snippet in the plan/README instead of a permanent test-suite entry."
+    }
+  ],
+  "residual_risks": [
+    "Every feature ViewModel factory (BackdateViewModel, HistoryViewModel, SettingsViewModel) directly imports and instantiates widget.FeedWidget to trigger a redraw (`FeedWidget().updateAll(appContext)`), duplicated identically in three companion objects. This is consistent with the plan's explicit 'no DI framework, manual singleton wiring' decision and is confined to the composition-root factory functions rather than the testable ViewModel bodies (which take the redraw as an injected lambda), so it's a reasonable tradeoff rather than a defect -- but it does mean any future change to how the widget is identified/instantiated (e.g. multiple widget types) requires touching three unrelated packages in lockstep.",
+    "MediaPipeTimeParsingLlm's model path is a hardcoded string constant (`/data/local/tmp/llm/model.task`) duplicated as the implicit contract between the README's adb-push instructions and the code; there's no single source of truth test or build-time check tying the two together, so if the path is ever changed in one place it would silently break the other."
+  ],
+  "testing_gaps": [
+    "MediaPipeTimeParsingLlmTest (androidTest) asserts TimeParseResult.ModelUnavailable specifically because 'the Gemma model genuinely isn't pushed to this device yet' -- the test's correctness depends on current, external device state rather than a controlled fixture. Once the model is actually adb-pushed (which the plan's own Risks & Dependencies section says is still outstanding), this test will start failing even though the model-present code path was never exercised, and there is no corresponding test for the model-present happy path.",
+    "SettingsViewModel's init block fetches the persisted interval asynchronously but seeds _intervalMillis with DEFAULT_FEEDING_INTERVAL_MILLIS synchronously; there's no unit test covering the brief window where a non-default persisted interval hasn't loaded yet (e.g. verifying the UI doesn't flash the wrong radio button before the real value arrives)."
+  ]
+}

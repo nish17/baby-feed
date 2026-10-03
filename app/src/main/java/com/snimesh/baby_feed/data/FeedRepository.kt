@@ -17,6 +17,8 @@ interface FeedRepository {
     /** "Last feed" = max(timestamp) across all entries, not the most-recently-edited row. */
     suspend fun mostRecent(): FeedEntry?
 
+    suspend fun getById(id: Long): FeedEntry?
+
     suspend fun logFeed(timestampMillis: Long, nowMillis: Long): Long
 
     suspend fun updateFeed(entry: FeedEntry, nowMillis: Long)
@@ -41,6 +43,8 @@ class RoomFeedRepository(private val dao: FeedDao) : FeedRepository {
     override fun observeAll(): Flow<List<FeedEntry>> = dao.observeAll()
 
     override suspend fun mostRecent(): FeedEntry? = dao.getMostRecent()
+
+    override suspend fun getById(id: Long): FeedEntry? = dao.getById(id)
 
     override suspend fun logFeed(timestampMillis: Long, nowMillis: Long): Long {
         require(timestampMillis <= nowMillis) { "Cannot log a feed in the future" }

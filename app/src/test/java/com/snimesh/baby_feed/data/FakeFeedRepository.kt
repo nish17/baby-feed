@@ -12,6 +12,8 @@ class FakeFeedRepository : FeedRepository {
 
     override suspend fun mostRecent(): FeedEntry? = entriesFlow.value.maxByOrNull { it.timestampMillis }
 
+    override suspend fun getById(id: Long): FeedEntry? = entriesFlow.value.find { it.id == id }
+
     override suspend fun logFeed(timestampMillis: Long, nowMillis: Long): Long {
         require(timestampMillis <= nowMillis) { "Cannot log a feed in the future" }
         val entry = FeedEntry(id = nextId++, timestampMillis = timestampMillis)

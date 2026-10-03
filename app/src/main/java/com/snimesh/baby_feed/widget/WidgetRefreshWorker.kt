@@ -1,6 +1,7 @@
 package com.snimesh.baby_feed.widget
 
 import android.content.Context
+import android.util.Log
 import androidx.glance.appwidget.updateAll
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -16,7 +17,16 @@ class WidgetRefreshWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        FeedWidget().updateAll(applicationContext)
-        return Result.success()
+        return try {
+            FeedWidget().updateAll(applicationContext)
+            Result.success()
+        } catch (e: Exception) {
+            Log.w(TAG, "Periodic widget refresh failed, will retry", e)
+            Result.retry()
+        }
+    }
+
+    companion object {
+        private const val TAG = "WidgetRefreshWorker"
     }
 }

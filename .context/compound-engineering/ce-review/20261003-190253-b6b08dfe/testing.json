@@ -1,0 +1,87 @@
+{
+  "reviewer": "testing",
+  "findings": [
+    {
+      "title": "RefreshWorkerTest only asserts Result.Success, never that the widget actually redraws/recomputes overdue state",
+      "why_it_matters": "The plan's own Verification section for Unit 2 claims this test 'recomputes and applies the overdue state when the next-feed time has passed,' but the test body never seeds a FeedEntry, never sets the feeding interval, and never reads back any widget/Glance state after doWork(). It only checks that the Result type is Success. A regression that made WidgetRefreshWorker.doWork() a no-op (e.g. forgetting the FeedWidget().updateAll() call, or updateAll() silently failing) would still pass this test, since any CoroutineWorker that returns Result.success() satisfies the assertion. This is false confidence: the test name and the plan's documented intent both overclaim what is actually verified.",
+      "evidence": "app/src/androidTest/java/com/snimesh/baby_feed/widget/RefreshWorkerTest.kt lines 1-25: `val result = worker.doWork(); assertTrue(result is Result.Success)` -- no data setup, no assertion on GlanceAppWidgetManager/Glance state/widget content before vs. after.",
+      "severity": "P2",
+      "file": "app/src/androidTest/java/com/snimesh/baby_feed/widget/RefreshWorkerTest.kt",
+      "line": 19,
+      "confidence": 0.75,
+      "autofix_class": "manual",
+      "owner": "testing",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Seed a FeedEntry via FeedRepository (or RoomFeedRepository against the same in-memory/instrumented DB) with a timestamp that makes the feed overdue, run doWork(), then read back the GlanceAppWidget's rendered/glance state (e.g. via GlanceAppWidgetManager + the widget's currentState, or by asserting on the underlying SharedPreferences-backed Glance state) to confirm the overdue status was actually recomputed and applied -- not just that doWork() returned Success."
+    },
+    {
+      "title": "HistoryViewModel's widget-redraw side effect (onEntriesChanged) is never exercised by a test, unlike the equivalent pattern in BackdateViewModel and SettingsViewModel",
+      "why_it_matters": "BackdateViewModel and SettingsViewModel each inject an `onEntrySaved`/`onIntervalChanged` callback for triggering a widget redraw, and each has an explicit unit test (`confirm_savesEntryAndTriggersWidgetRedraw`, `changingTheInterval_triggersWidgetRedraw`) proving the callback fires. HistoryViewModel follows the exact same pattern with `onEntriesChanged`, called after both updateEntry's success path and deleteEntry -- but no test in HistoryViewModelTest ever passes a non-default onEntriesChanged and asserts it was invoked (or that it is correctly skipped on the future-timestamp rejection path). A regression that dropped the onEntriesChanged() call from updateEntry/deleteEntry (e.g. during a refactor) would leave the widget showing stale last-feed data after an edit/delete, and no test would catch it.",
+      "evidence": "app/src/main/java/com/snimesh/baby_feed/history/HistoryViewModel.kt lines 28-39 (updateEntry/deleteEntry both call onEntriesChanged()); app/src/test/java/com/snimesh/baby_feed/history/HistoryViewModelTest.kt -- all four tests construct `HistoryViewModel(repository)` using the default no-op onEntriesChanged and only assert on repository/entries state, never on whether the callback fired.",
+      "severity": "P2",
+      "file": "app/src/test/java/com/snimesh/baby_feed/history/HistoryViewModelTest.kt",
+      "line": 1,
+      "confidence": 0.75,
+      "autofix_class": "safe_auto",
+      "owner": "testing",
+      "requires_verification": false,
+      "pre_existing": false,
+      "suggested_fix": "Add tests mirroring BackdateViewModelTest/SettingsViewModelTest's redraw tests: construct HistoryViewModel with an onEntriesChanged = { redrawTriggered = true } lambda, call updateEntry/deleteEntry, and assert the flag was set for the success paths (and optionally assert it is NOT set when updateEntry is rejected for a future timestamp)."
+    },
+    {
+      "title": "RoomFeedRepository.updateFeed (and FeedDao.update) has zero instrumented test coverage",
+      "why_it_matters": "FeedDaoTest exercises the real Room/SQLite round-trip for insert, delete, and 'most recent' selection, but never calls repository.updateFeed() / dao.update(). HistoryViewModel's edit flow is the only production caller of this path, and its future-timestamp validation plus the actual UPDATE SQL behavior (e.g. correctly matching on primary key rather than inserting a duplicate row) are only verified against FakeFeedRepository's separately-reimplemented logic in HistoryViewModelTest, never against the real Room implementation. A bug specific to the real DAO/Room mapping (annotation misuse, wrong @Update target, etc.) would not be caught by any existing test.",
+      "evidence": "app/src/androidTest/java/com/snimesh/baby_feed/data/FeedDaoTest.kt tests: insertAndReadBack_mostRecentMatches, logFeed_withFutureTimestamp_isRejected, deletingOnlyEntry_returnsToNoData, deletingNewestOfSeveral_fallsBackToNextMostRecent -- none call repository.updateFeed(). app/src/main/java/com/snimesh/baby_feed/data/FeedRepository.kt lines 39-42 define RoomFeedRepository.updateFeed with its own require() validation that is distinct code from FakeFeedRepository's reimplementation.",
+      "severity": "P2",
+      "file": "app/src/androidTest/java/com/snimesh/baby_feed/data/FeedDaoTest.kt",
+      "line": 1,
+      "confidence": 0.7,
+      "autofix_class": "safe_auto",
+      "owner": "testing",
+      "requires_verification": false,
+      "pre_existing": false,
+      "suggested_fix": "Add instrumented tests to FeedDaoTest: (1) insert an entry, update its timestampMillis via repository.updateFeed(), and assert the row was updated in place (same id, new timestamp, no duplicate row); (2) assert updateFeed with a future timestamp throws IllegalArgumentException and leaves the stored row unchanged, mirroring the existing logFeed_withFutureTimestamp_isRejected test."
+    },
+    {
+      "title": "AndroidSpeechCaptureController's deterministic permission-denied branch has no test, and the class has zero test coverage of any kind",
+      "why_it_matters": "AndroidSpeechCaptureController.startListening() checks RECORD_AUDIO permission before touching SpeechRecognizer at all. In an instrumented test run, RECORD_AUDIO is not granted by default (no GrantPermissionRule / adb grant is used anywhere in the diff), so calling startListening() in an androidTest should deterministically return SpeechCaptureResult.PermissionDenied without needing an actual microphone or on-device STT engine. This specific branch is cheap to test and currently has no coverage anywhere -- BackdateViewModelTest only exercises the PermissionDenied routing via FakeSpeechCaptureController, never the real implementation's permission check. The isOnDeviceRecognitionAvailable()-false branch and the RecognitionListener plumbing (onResults/onError/destroy-in-finally) are harder to test deterministically and are reasonably left to manual verification, but the permission-check branch is a clear, low-cost gap.",
+      "evidence": "app/src/main/java/com/snimesh/baby_feed/backdate/SpeechCaptureController.kt lines 24-30 (AndroidSpeechCaptureController.startListening permission check); no file under app/src/androidTest references AndroidSpeechCaptureController at all.",
+      "severity": "P2",
+      "file": "app/src/main/java/com/snimesh/baby_feed/backdate/SpeechCaptureController.kt",
+      "line": 24,
+      "confidence": 0.65,
+      "autofix_class": "safe_auto",
+      "owner": "testing",
+      "requires_verification": false,
+      "pre_existing": false,
+      "suggested_fix": "Add an instrumented test that constructs AndroidSpeechCaptureController with the app context (RECORD_AUDIO ungranted, the default instrumented-test state) and asserts startListening() returns SpeechCaptureResult.PermissionDenied."
+    },
+    {
+      "title": "SettingsViewModel's init-block hydration from a pre-existing stored interval is never tested",
+      "why_it_matters": "SettingsViewModel's init block launches a coroutine that overwrites the default _intervalMillis with whatever repository.getFeedingIntervalMillis() returns -- this is the 'load the father's previously chosen interval on app restart' behavior. Every existing test constructs FakeSettingsRepository with the default interval (either implicitly or by passing DEFAULT_FEEDING_INTERVAL_MILLIS explicitly), so the init block's overwrite is never actually observed doing anything: the tests would pass identically even if the init block were deleted entirely.",
+      "evidence": "app/src/main/java/com/snimesh/baby_feed/settings/SettingsViewModel.kt lines 19-23 (init block); app/src/test/java/com/snimesh/baby_feed/settings/SettingsViewModelTest.kt -- all three tests start from FakeSettingsRepository() or FakeSettingsRepository(intervalMillis = DEFAULT_FEEDING_INTERVAL_MILLIS), never from a non-default stored value.",
+      "severity": "P3",
+      "file": "app/src/test/java/com/snimesh/baby_feed/settings/SettingsViewModelTest.kt",
+      "line": 1,
+      "confidence": 0.6,
+      "autofix_class": "safe_auto",
+      "owner": "testing",
+      "requires_verification": false,
+      "pre_existing": false,
+      "suggested_fix": "Add a test constructing FakeSettingsRepository(intervalMillis = TimeUnit.HOURS.toMillis(4)) (a non-default value), creating the SettingsViewModel from it, and asserting viewModel.intervalMillis.value equals the stored 4-hour value -- proving the init block actually hydrates from the repository rather than always falling back to the hardcoded default."
+    }
+  ],
+  "residual_risks": [
+    "The actual Gemma 3 1B model has not been pushed to any test device, so MediaPipeTimeParsingLlm's real inference path (loadModel + generateResponse + parseModelResponse against a genuine model response) is completely unverified end-to-end, automated or manual -- only the model-missing fallback is confirmed on-device. This is already acknowledged by the author in the plan's Risks & Dependencies table, not a newly discovered gap.",
+    "AndroidSpeechCaptureController's RecognitionListener-driven happy path (onResults with a real transcription, onError from a real recognizer failure, and the recognizer.destroy() cleanup in the finally block) has no automated coverage anywhere and can only be exercised by manual on-device testing with real speech input, since it depends on live Android SpeechRecognizer callbacks.",
+    "Widget real-world rendering, tap responsiveness, and the production 15-minute WorkManager cadence are explicitly manual-verification-only per the plan and this diff; Glance's own unit-test API (used in WidgetContentTest) does not exercise real AppWidget hosting."
+  ],
+  "testing_gaps": [
+    "No test verifies RefreshWorkerTest's documented claim that the worker 'recomputes and applies the overdue state' -- the existing test only checks for a non-throwing Result.Success, so a no-op worker would pass.",
+    "HistoryViewModel's onEntriesChanged (widget redraw) side effect is untested, unlike the equivalent BackdateViewModel/SettingsViewModel redraw tests.",
+    "RoomFeedRepository.updateFeed / FeedDao.update have no instrumented coverage against a real Room database.",
+    "AndroidSpeechCaptureController (the real SpeechCaptureController implementation) has no test coverage at all, including the deterministic permission-denied branch.",
+    "SettingsViewModel's startup hydration from a non-default stored interval is unverified."
+  ]
+}

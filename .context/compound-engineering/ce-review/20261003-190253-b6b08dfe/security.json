@@ -1,0 +1,30 @@
+{
+  "reviewer": "security",
+  "findings": [
+    {
+      "title": "allowBackup/cloud backup config does not exclude the new feed database or settings, contradicting the \"nothing leaves the device\" claim",
+      "severity": "P2",
+      "file": "app/src/main/AndroidManifest.xml",
+      "line": 7,
+      "confidence": 0.65,
+      "autofix_class": "manual",
+      "owner": "app",
+      "requires_verification": true,
+      "pre_existing": true,
+      "suggested_fix": "android:allowBackup=\"true\" plus an empty <cloud-backup> block in app/src/main/res/xml/data_extraction_rules.xml (and an empty <full-backup-content> in backup_rules.xml) mean the new Room database (feed.db, containing feed timestamps) and the new SharedPreferences file (baby_feed_settings) are included in Android's default Auto Backup to the user's Google account by default, since no <exclude> rules were added for them. This is the one place real feeding data can leave the device despite the explicit 'no network calls anywhere in the logging path' design elsewhere (SpeechCaptureController and MediaPipeTimeParsingLlm correctly stay fully on-device, and there is no INTERNET permission declared, which blocks any accidental network call at the OS level -- but Android's own backup subsystem is a separate code path not gated by that permission). Either set android:allowBackup=\"false\", or add explicit <exclude domain=\"database\" path=\"feed.db\"/> and <exclude domain=\"sharedpref\" path=\"baby_feed_settings.xml\"/> entries to data_extraction_rules.xml (cloud-backup and device-transfer sections) so the privacy pitch holds even when the user has Google account backup enabled."
+    }
+  ],
+  "residual_risks": [
+    "No android.permission.INTERNET is declared anywhere in the diff, which is a strong, OS-enforced guarantee backing the 'nothing leaves the device' claim: even if the bundled MediaPipe tasks-genai native library attempted a network call, the OS would block the socket at the kernel/UID level. This was specifically verified and found correct.",
+    "SpeechCaptureController (AndroidSpeechCaptureController) correctly checks RECORD_AUDIO via ContextCompat.checkSelfPermission before use, gates on SpeechRecognizer.isOnDeviceRecognitionAvailable(), and uses only SpeechRecognizer.createOnDeviceSpeechRecognizer() -- there is no call to createSpeechRecognizer() (the network-backed variant) anywhere, and EXTRA_PREFER_OFFLINE is set defensively. No fallback path routes audio to a network recognizer.",
+    "MediaPipeTimeParsingLlm loads the Gemma model from a local file path (/data/local/tmp/llm/model.task, pushed via adb) and calls LlmInference.generateResponse() purely in-process; no network client is constructed anywhere in TimeParsingLlm.kt. The free-text voice/typed transcript is interpolated directly into the LLM prompt (buildPrompt), which is a theoretical prompt-injection surface, but the model's output is immediately constrained by a strict regex (TIMESTAMP_PATTERN) and a 'not in the future' check in parseModelResponse/RoomFeedRepository.logFeed, so a successful injection can at most produce an Unparseable result (routes to the manual picker) -- there is no code-execution or data-exfiltration consequence, so this was not raised as a standalone finding.",
+    "FeedWidgetReceiver is declared android:exported=\"true\", which is required by the AppWidgetProvider contract so the system can deliver APPWIDGET_UPDATE broadcasts. Jetpack Glance's internal action-dispatch protocol is delivered via intents to this same exported receiver class; another installed app that knows Glance's internal action-intent format could in principle trigger LogNowAction/UndoLogAction without going through the UI. Impact is minimal (it can only log or delete the user's own feed timestamp) and this is inherent to how Glance widgets work, so it was not raised as a primary finding, but is noted for completeness given the single-device threat model explicitly excludes other apps.",
+    "HistoryActivity and SettingsActivity are correctly declared android:exported=\"false\", preventing other apps from launching them directly with crafted intents.",
+    "SharedPrefsSettingsRepository correctly uses Context.MODE_PRIVATE (no MODE_WORLD_READABLE/WRITEABLE)."
+  ],
+  "testing_gaps": [
+    "No test/CI check guards against android.permission.INTERNET (or any other network-capable permission) being added in a future change, which would be the single most important regression to catch given the app's core privacy pitch.",
+    "No test verifies that data_extraction_rules.xml / backup_rules.xml actually exclude the Room database and SharedPreferences from Android Auto Backup -- see the finding above.",
+    "No instrumented test exercises the actual on-device SpeechRecognizer error/permission-denied paths against a real device/emulator with RECORD_AUDIO revoked (OnDeviceSttAvailabilityTest only logs availability and doesn't assert; the permission-denied unit test uses a fake, not the real ContextCompat.checkSelfPermission gate in AndroidSpeechCaptureController)."
+  ]
+}

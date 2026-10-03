@@ -67,4 +67,45 @@ class HistoryViewModelTest {
         assertEquals(now - 60_000L, repository.mostRecent()?.timestampMillis)
         assertEquals(1, viewModel.entries.value.size)
     }
+
+    @Test
+    fun updateEntry_triggersWidgetRedraw() = runTest {
+        val repository = FakeFeedRepository()
+        val now = 10_000_000L
+        repository.logFeed(timestampMillis = now - 60_000L, nowMillis = now)
+        val entry = repository.mostRecent()!!
+        var redrawTriggered = false
+        val viewModel = HistoryViewModel(repository, onEntriesChanged = { redrawTriggered = true })
+
+        viewModel.updateEntry(entry.copy(timestampMillis = now - 30_000L))
+
+        assertTrue(redrawTriggered)
+    }
+
+    @Test
+    fun updateEntry_rejectedEdit_doesNotTriggerWidgetRedraw() = runTest {
+        val repository = FakeFeedRepository()
+        val now = 10_000_000L
+        repository.logFeed(timestampMillis = now - 60_000L, nowMillis = now)
+        val entry = repository.mostRecent()!!
+        var redrawTriggered = false
+        val viewModel = HistoryViewModel(repository, onEntriesChanged = { redrawTriggered = true })
+
+        viewModel.updateEntry(entry.copy(timestampMillis = System.currentTimeMillis() + 60_000L))
+
+        assertTrue(!redrawTriggered)
+    }
+
+    @Test
+    fun deleteEntry_triggersWidgetRedraw() = runTest {
+        val repository = FakeFeedRepository()
+        repository.logFeed(timestampMillis = 10_000_000L, nowMillis = 10_000_000L)
+        val entry = repository.mostRecent()!!
+        var redrawTriggered = false
+        val viewModel = HistoryViewModel(repository, onEntriesChanged = { redrawTriggered = true })
+
+        viewModel.deleteEntry(entry)
+
+        assertTrue(redrawTriggered)
+    }
 }

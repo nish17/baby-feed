@@ -1,0 +1,91 @@
+{
+  "reviewer": "adversarial",
+  "findings": [
+    {
+      "title": "Cascade: clock stepped backward between picker/LLM-parse time and confirm tap crashes BackdateViewModel.onConfirm",
+      "severity": "P1",
+      "file": "app/src/main/java/com/snimesh/baby_feed/backdate/BackdateViewModel.kt",
+      "line": 630,
+      "confidence": 0.75,
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Wrap the repository.logFeed(...) call in onConfirm in a try/catch for IllegalArgumentException (same pattern HistoryViewModel.updateEntry already uses) and route to a safe state (e.g. back to ManualPicker or Idle with a toast) instead of letting it crash viewModelScope.",
+      "evidence": [
+        "Trigger: BackdateUiState.ManualPicker captures nowMillis = System.currentTimeMillis() when the picker opens; the user picks e.g. 'Just now' producing timestampMillis = that nowMillis. Equivalently, TimeParsingLlm.parse validates parsedMillis against an earlier nowMillis snapshot taken before the (possibly multi-second) on-device LLM inference call.",
+      "Step: the resulting timestampMillis is only guaranteed <= the OLD nowMillis snapshot, not <= whatever System.currentTimeMillis() returns later.",
+        "Step: BackdateViewModel.onConfirm() independently captures `val now = System.currentTimeMillis()` and calls `repository.logFeed(timestampMillis, nowMillis = now)`. RoomFeedRepository.logFeed does `require(timestampMillis <= nowMillis) { \"Cannot log a feed in the future\" }`.",
+        "Step: on a real phone, an NTP time sync, manual clock adjustment, or timezone/DST change between picker-open time and confirm-tap time can make the new `now` smaller than the old nowMillis snapshot the timestamp was derived from, flipping the invariant so timestampMillis > now.",
+        "Failure: `require(...)` throws IllegalArgumentException inside `viewModelScope.launch { ... }` with no try/catch anywhere in this call site. Kotlin coroutines propagate an uncaught exception from `launch` to the thread's default uncaught-exception handler, crashing the Activity/app -- this is the exact production doc's own documented contract ('ViewModels catch and silently reject a future-timestamp edit/log') but the fix was only applied to HistoryViewModel.updateEntry, not here.",
+        "Composition failure: FeedRepository's write-path contract (throws IllegalArgumentException on a future timestamp) is honored at one call site (HistoryViewModel.updateEntry, which catches it) and not at another call site (BackdateViewModel.onConfirm, which doesn't) despite both being equally reachable, normal-usage write paths -- not an edge case requiring malicious input, just ordinary clock behavior on a consumer phone."
+      ]
+    },
+    {
+      "title": "Abuse case: Undo always deletes whatever is currently 'most recent', not the entry that produced the Undo banner, so a later unrelated log silently becomes the Undo target",
+      "severity": "P1",
+      "file": "app/src/main/java/com/snimesh/baby_feed/widget/WidgetActionHandler.kt",
+      "line": 1579,
+      "confidence": 0.8,
+      "autofix_class": "advisory",
+      "owner": "human",
+      "requires_verification": false,
+      "pre_existing": false,
+      "suggested_fix": null,
+      "evidence": [
+        "Trigger: parent taps 'Log feed now' at 2:00pm -> E1 inserted, JUST_LOGGED_UNDO=true, widget shows 'Logged just now' + 'Undo' button.",
+        "Observation: WidgetContent.kt renders the 'Log feed now' button unconditionally, outside the if(justLoggedUndo)/else block, so it is visible at the same time as the 'Undo' banner for a previous log -- nothing disables logging while an Undo is pending.",
+        "Step: at 2:10pm a real feed happens; parent taps the still-visible 'Log feed now' button again -> E2 inserted, JUST_LOGGED_UNDO re-set to true (unchanged), mostRecent() is now E2. The widget still shows the same 'Logged just now / Undo' banner, giving no visual indication that Undo's target has silently switched entries.",
+        "Step: parent, still thinking the banner refers to the 2:00pm tap they now regret, taps 'Undo'. UndoLogAction -> WidgetActionHandler.undoLastLog() -> `repository.mostRecent()?.let { repository.deleteFeed(it) }` deletes E2 (the 2:10pm REAL feed), not E1 (the one the parent actually wanted to undo).",
+        "Final state: the accidental E1 entry is permanently retained and silently corrupts the feeding history/next-feed countdown, while the legitimate E2 feed is deleted with no recovery path (no soft-delete/trash; History only shows rows that still exist in Room). The JUST_LOGGED_UNDO preference flag is never expired or rebound to a specific entry id by any code path (not by time, not by BackdateViewModel.onConfirm, not by HistoryViewModel edits/deletes), so this mismatch can persist indefinitely until the next widget tap."
+      ]
+    },
+    {
+      "title": "Concurrent LLM singleton access: double-tapping 'Submit typed text' (or Speak immediately followed by typed submit) can load the 529MB Gemma model twice",
+      "severity": "P2",
+      "file": "app/src/main/java/com/snimesh/baby_feed/backdate/TimeParsingLlm.kt",
+      "line": 844,
+      "confidence": 0.7,
+      "autofix_class": "manual",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Guard the lazy-load check-and-set with a Mutex (or synchronized block / double-checked locking like the companion object's getInstance already uses) so only one caller ever executes loadModel(), and close() any instance that loses the race instead of discarding it.",
+      "evidence": [
+        "Trigger: BackdateActivity's Idle screen lets the user tap 'Submit typed text' repeatedly with no debounce or disabling while the first tap's coroutine is still only in the Main-dispatcher gap between the click and `_uiState.value = Parsing` being set; each tap launches a separate `viewModelScope.launch { parseAndTransition(text) }` coroutine.",
+        "Step: both coroutines eventually call `timeParsingLlm.parse(text, now)` on MediaPipeTimeParsingLlm, which runs `withContext(Dispatchers.IO) { ... val llm = llmInference ?: loadModel().also { llmInference = it } ... }`.",
+        "Step: `llmInference` is `@Volatile` but the read-check-load-write sequence is NOT inside any `synchronized`/Mutex block (unlike the companion object's `getInstance`, which correctly double-checks under `synchronized(this)`). Two IO-dispatcher coroutines can both observe `llmInference == null` and both call `loadModel()`.",
+        "Failure: two full ~529MB on-device Gemma model instances get loaded concurrently -- doubling peak memory use (real OOM risk on a phone) and silently leaking the loser's `LlmInference` instance (its GPU/accelerator session is never closed since only the final assignment to `llmInference` survives)."
+      ]
+    },
+    {
+      "title": "Composition failure: concurrent widget Undo and History '-15m' edit on the same row race, and the edit silently no-ops with no user feedback",
+      "severity": "P2",
+      "file": "app/src/main/java/com/snimesh/baby_feed/history/HistoryViewModel.kt",
+      "line": 1202,
+      "confidence": 0.62,
+      "autofix_class": "advisory",
+      "owner": "human",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": null,
+      "evidence": [
+        "Trigger: the father has the History screen open editing the same entry that is currently the widget's 'mostRecent()' (and therefore eligible to be the widget's Undo target), on a multi-window-capable device or simply switching quickly between the two surfaces.",
+        "Step: a widget Undo tap runs `WidgetActionHandler.undoLastLog()` -> `repository.deleteFeed(entry)` which issues Room's generated `DELETE ... WHERE id = ?` for that row.",
+        "Step: concurrently, HistoryViewModel.updateEntry(entry) for the SAME row runs `repository.updateFeed(entry, now)` -> Room's generated `@Update` issues `UPDATE ... WHERE id = ?`.",
+        "Failure: if the delete commits first, the subsequent UPDATE matches zero rows and Room's `@Update` does not report or throw on a zero-row update by default -- HistoryViewModel.updateEntry has no code path to detect this, so `onEntriesChanged()` still fires, the widget redraws correctly (entry is indeed gone), but the father who tapped '-15m' gets no indication that their edit was silently discarded rather than applied."
+      ]
+    }
+  ],
+  "residual_risks": [
+    "Double-tapping 'Log feed now' (two taps before the widget redraws away the button) inserts two near-identical FeedEntry rows; this is explicitly called out and accepted in the plan doc's Unit 2 edge-case notes ('the first entry becomes final once the second affordance appears; it remains recoverable only via History, not via a stacked undo') -- flagged here only because it is the direct enabler of the more severe Undo-target-mismatch finding above, not as a new issue.",
+    "Glance ActionCallback instances (LogNowAction/UndoLogAction) are stateless and re-fetch WidgetActionHandler/FeedRepository via application-scoped singletons on every invocation, so OS re-instantiation of the ActionCallback mid-flow does not lose state -- verified as a non-issue for this diff.",
+    "SharedPrefsSettingsRepository.setFeedingIntervalMillis uses the KTX `edit {}` extension, which defaults to the async `apply()` path; a process kill in the narrow window after SettingsViewModel.setIntervalMillis returns but before the OS flushes the pref to disk could lose the interval change on next cold start. Low likelihood, not verified against actual device behavior.",
+    "AndroidSpeechCaptureController does not call `continuation.invokeOnCancellation { recognizer.cancel() }` before the `finally { recognizer.destroy() }`; if the surrounding coroutine is cancelled (e.g. BackdateActivity finishing mid-listen), destroy() still runs so no resource leak, but the recognizer may log/surface a benign 'destroyed while listening' warning rather than a clean stop. Not independently verified against SpeechRecognizer's actual tolerance for this."
+  ],
+  "testing_gaps": [
+    "No BackdateViewModelTest covers onConfirm() being called with a timestampMillis that is (due to a backward clock step) greater than onConfirm's freshly-captured `now` -- the exact IllegalArgumentException-uncaught crash path identified above is entirely untested, unlike HistoryViewModelTest's equivalent future-timestamp case which IS covered.",
+    "No test exercises two concurrent/rapid invocations of UndoLogAction or WidgetActionHandler.undoLastLog() against a repository with more than one entry already present (existing WidgetActionHandlerTest only covers 'double log, single undo' and 'undo with zero entries') -- the 'undo deletes the wrong, unrelated entry' scenario has no regression coverage.",
+    "No test exercises MediaPipeTimeParsingLlm.parse() called concurrently from two coroutines against the same instance to confirm the model is loaded exactly once under contention -- the lazy-load path is untested for thread-safety despite being the one piece of this diff explicitly called out as a concurrency risk area."
+  ]
+}

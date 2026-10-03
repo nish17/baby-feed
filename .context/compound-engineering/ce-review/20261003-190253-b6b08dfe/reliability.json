@@ -1,0 +1,88 @@
+{
+  "reviewer": "reliability",
+  "findings": [
+    {
+      "title": "MediaPipeTimeParsingLlm.parse() can throw uncaught from LlmInference.createFromOptions/generateResponse, crashing instead of returning ModelUnavailable",
+      "severity": "P1",
+      "file": "app/src/main/java/com/snimesh/baby_feed/backdate/TimeParsingLlm.kt",
+      "line": 839,
+      "confidence": 0.85,
+      "autofix_class": "needs-human",
+      "owner": "reliability",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Wrap loadModel() and llm.generateResponse(prompt) in try/catch (catch Throwable or at least RuntimeException) inside parse(), returning TimeParseResult.ModelUnavailable on failure, consistent with the stated contract that parse() never throws. The only guard today is File(MODEL_PATH).exists() -- a present-but-corrupt/incompatible .task file, an OOM during the ~529MB model load, or a native/JNI failure inside generateResponse() will propagate an uncaught exception through withContext(Dispatchers.IO) -> viewModelScope.launch in BackdateViewModel (onSpeakClicked/onTypedTextSubmitted), which has no exception handling, crashing the app instead of routing to ManualPicker as the design explicitly requires."
+    },
+    {
+      "title": "AndroidSpeechCaptureController.startListening() has no timeout -- a hung on-device recognizer leaves the UI stuck on \"Listening…\" forever",
+      "severity": "P2",
+      "file": "app/src/main/java/com/snimesh/baby_feed/backdate/SpeechCaptureController.kt",
+      "line": 724,
+      "confidence": 0.7,
+      "autofix_class": "needs-human",
+      "owner": "reliability",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Wrap the suspendCancellableCoroutine call in withTimeout(...) (e.g. a few seconds past expected speech length) and resume with SpeechCaptureResult.RecognitionError on timeout. onResults/onError are both handled with isActive guards, but if the on-device recognizer never calls back at all (buggy engine, stuck mic resource), the coroutine suspends indefinitely and BackdateViewModel never reaches openManualPicker(), defeating the 'always fail closed to manual picker' design goal."
+    },
+    {
+      "title": "SpeechRecognizer.createOnDeviceSpeechRecognizer() call is not guarded by try/catch",
+      "severity": "P2",
+      "file": "app/src/main/java/com/snimesh/baby_feed/backdate/SpeechCaptureController.kt",
+      "line": 722,
+      "confidence": 0.62,
+      "autofix_class": "needs-human",
+      "owner": "reliability",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "isOnDeviceRecognitionAvailable() returning true does not guarantee createOnDeviceSpeechRecognizer() won't throw (e.g. the recognition service dying between the check and the call). Wrap the recognizer creation in try/catch and return SpeechCaptureResult.Unavailable or RecognitionError on failure, instead of letting the exception propagate uncaught out of startListening() into BackdateViewModel's coroutine."
+    },
+    {
+      "title": "WidgetRefreshWorker.doWork() has no explicit error handling around FeedWidget().updateAll()",
+      "severity": "P2",
+      "file": "app/src/main/java/com/snimesh/baby_feed/widget/WidgetRefreshWorker.kt",
+      "line": 19,
+      "confidence": 0.65,
+      "autofix_class": "needs-human",
+      "owner": "reliability",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "updateAll() -> provideGlance() calls FeedRepository.mostRecent() (Room) and SettingsRepository.getFeedingIntervalMillis() (SharedPreferences); if either throws (disk full, DB corruption/migration issue), the exception propagates out of doWork() uninstrumented. CoroutineWorker/WorkManager will likely convert this into an internal failure without crashing the app, but there is no try/catch, no Result.retry()/Result.failure() decision, and no logging -- a persistent fault repeats silently every 15 minutes with the widget frozen and no diagnostic signal. Wrap the body in try/catch, log, and return Result.success() (best-effort, matching the 'backstop' nature of this job) or Result.retry() for transient failures."
+    },
+    {
+      "title": "LogNowAction/UndoLogAction/WidgetActionHandler have no error handling around FeedRepository Room writes",
+      "severity": "P2",
+      "file": "app/src/main/java/com/snimesh/baby_feed/widget/WidgetActionHandler.kt",
+      "line": 10,
+      "confidence": 0.62,
+      "autofix_class": "needs-human",
+      "owner": "reliability",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "logFeedNow()/undoLastLog() call repository.logFeed()/mostRecent()/deleteFeed() with no try/catch, and LogNowAction/UndoLogAction call these plus updateAppWidgetState()/updateAll() with no error handling either. A transient Room/SQLite I/O failure (disk full, DB locked) propagates uncaught through the Glance ActionCallback.onAction(), which runs in the app's own process -- unlike the STT/LLM paths, there is no defined fallback behavior here (the widget tap would just fail with no visible indication to the user, or crash the process). Add try/catch around the repository calls in WidgetActionHandler (or in the actions) and leave the widget state unchanged on failure rather than letting the exception escape."
+    },
+    {
+      "title": "BackdateViewModel.onConfirm() and HistoryViewModel's repository writes only catch IllegalArgumentException, not general I/O failures",
+      "severity": "P3",
+      "file": "app/src/main/java/com/snimesh/baby_feed/backdate/BackdateViewModel.kt",
+      "line": 631,
+      "confidence": 0.6,
+      "autofix_class": "needs-human",
+      "owner": "reliability",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "onConfirm() calls repository.logFeed() with no try/catch at all; HistoryViewModel.updateEntry() catches only IllegalArgumentException (the future-timestamp validation), and deleteEntry() has no handling. A genuine Room/SQLite I/O failure (not a validation rejection) on any of these write paths propagates uncaught through viewModelScope.launch and crashes the hosting Activity, which is inconsistent with the app's stated 'never crash' reliability bar for its primary save action. Low severity/confidence because this is a very low-probability failure mode for local SQLite writes on a single personal device, but worth a defensive catch-and-no-op (or catch-and-toast) given the design's otherwise strong emphasis on never crashing."
+    }
+  ],
+  "residual_risks": [
+    "The explicit 'model file missing' fallback is instrumented-tested, but no test (unit or instrumented) exercises a present-but-corrupt or format-incompatible model file, or an exception thrown mid-inference by LlmInference.generateResponse() -- the actual crash-vs-fallback behavior for that scenario is unverified.",
+    "Glance ActionCallback failure semantics (what happens to the host process / widget if onAction() throws) are not something this diff can confirm from static inspection alone -- behavior may vary by Android version and Glance runtime version.",
+    "WorkManager's exact handling of an uncaught exception thrown from CoroutineWorker.doWork() (crash vs. silently-recorded Result.FAILURE) depends on AndroidX WorkManager version/internals not visible in this diff."
+  ],
+  "testing_gaps": [
+    "No test covers MediaPipeTimeParsingLlm.parse() when the model file exists but LlmInference.createFromOptions() or generateResponse() throws (corrupt file, incompatible format, OOM, native crash) -- only the 'file missing' path is covered (MediaPipeTimeParsingLlmTest).",
+    "No test covers AndroidSpeechCaptureController.startListening() hanging (no RecognitionListener callback ever firing) to verify timeout/fallback behavior.",
+    "RefreshWorkerTest only asserts the success path (doWork_triggersWidgetRedrawAndSucceeds); no test forces FeedWidget().updateAll() to throw and asserts WidgetRefreshWorker's resulting Result or absence of a crash.",
+    "WidgetActionHandlerTest covers only the FakeFeedRepository happy path; no test exercises logFeedNow()/undoLastLog() when the repository throws, to verify LogNowAction/UndoLogAction don't propagate the exception into the Glance runtime."
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "reviewer": "performance",
+  "findings": [
+    {
+      "title": "Unsynchronized lazy init of the ~529MB LlmInference model can double-load it and leak the discarded instance",
+      "severity": "P2",
+      "file": "app/src/main/java/com/snimesh/baby_feed/backdate/TimeParsingLlm.kt",
+      "line": 844,
+      "confidence": 0.65,
+      "autofix_class": "manual",
+      "owner": "android",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "val llm = llmInference ?: loadModel().also { llmInference = it } races if parse() is invoked concurrently (two IO-dispatcher threads can both observe llmInference == null and each call loadModel(), each allocating a ~529MB native LlmInference). The getInstance() singleton for MediaPipeTimeParsingLlm itself is correctly double-checked-locked, but this inner lazy field is not. Only one of the two loaded instances ends up referenced by the @Volatile field; the other is never closed, leaking its native-heap allocation (and transiently doubling memory pressure during the race) on this memory-constrained path. Guard the load with a Mutex/synchronized block (e.g. a kotlinx.coroutines Mutex around the check-and-set), or route all parse() calls through a single-threaded dispatcher/actor so concurrent loads can't occur."
+    }
+  ],
+  "residual_risks": [
+    "HistoryViewModel.entries uses SharingStarted.Eagerly, which keeps the Room Flow (and its underlying InvalidationTracker/SQLite query) actively collected for the entire lifetime of HistoryViewModel, including while HistoryActivity is backgrounded but not finished (e.g. user hits Home). At this app's scale (single user, tiny table) the cost is negligible, but WhileSubscribed(...) would be the more conventional choice if this pattern is copied to a future screen with heavier data.",
+    "HistoryViewModel re-sorts the already-DESC-ordered Room query result (list.sortedByDescending { ... }) on every emission -- redundant but inexpensive at this table size; would be worth removing only if the DAO query's ORDER BY were ever dropped.",
+    "MediaPipeTimeParsingLlm never exposes a close()/release() path for the native LlmInference -- acceptable for a process-lifetime application singleton as designed, but means the ~529MB native allocation is only reclaimed on process death, not on any explicit app-level 'free memory' trigger.",
+    "No explicit concurrency guard prevents two overlapping generateResponse() calls against the same LlmInference instance if parse() is ever invoked from more than one call site at once; current UI only exposes one entry point at a time so this is not currently reachable, but it's a hidden constraint on future callers."
+  ],
+  "testing_gaps": [
+    "No test exercises concurrent/overlapping calls to MediaPipeTimeParsingLlm.parse() to confirm the model is loaded exactly once and the discarded instance (if any) is handled safely.",
+    "No instrumented test measures actual Gemma 3 1B inference latency/memory on-device (acknowledged in the plan as still outstanding -- the model hasn't been pushed to a test device yet), so the 'kept warm, several seconds saved per call' performance rationale for the singleton is unverified in practice.",
+    "No test covers FeedWidget.provideGlance() behavior when FeedRepository/SettingsRepository singletons haven't been initialized yet (cold widget render directly after reboot, as the plan's own risk list calls out) -- functionally noted as a risk but not performance-measured (e.g. first-render latency while Room opens the DB file)."
+  ]
+}

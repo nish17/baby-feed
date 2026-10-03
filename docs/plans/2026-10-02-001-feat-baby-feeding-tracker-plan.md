@@ -99,10 +99,11 @@ None — this repository is currently empty aside from `docs/brainstorms/` and `
 
 > *This illustrates the intended approach and is directional guidance for review, not implementation specification. The implementing agent should treat it as context, not code to reproduce.*
 
-**Component boundaries.** A single `data` package (Room entities/DAO/repository/calculator) has zero outbound dependencies — every other package depends only on it, never on each other:
+**Component boundaries.** A single `data` package (Room entities/DAO/repository/calculator) has zero outbound dependencies — every other package depends only on it, never on each other. `widget/` has one sanctioned second dependency on `settings/` (a read of the configured interval) since the countdown can't be computed from `data/` alone — found by code review as a divergence from this diagram, resolved by documenting it here rather than adding indirection just to keep the diagram literally true:
 
 ```
         widget/ ---\
+                     +--> settings/  (interval read only)
      backdate/ -----> data/  (FeedRepository, FeedDatabase, NextFeedingCalculator)
       history/ -----> ^
      settings/ ------/
