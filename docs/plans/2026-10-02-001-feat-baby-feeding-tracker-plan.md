@@ -1,7 +1,7 @@
 ---
 title: feat: Baby Feeding Tracker — Android Widget with On-Device AI Backdating
 type: feat
-status: active
+status: completed
 date: 2026-10-02
 origin: docs/brainstorms/baby-feeding-tracker-widget-requirements.md
 deepened: 2026-10-02
