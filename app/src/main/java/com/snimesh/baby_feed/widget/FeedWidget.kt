@@ -11,7 +11,7 @@ import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.glance.state.GlanceStateDefinition
 import com.snimesh.baby_feed.data.FeedRepository
 import com.snimesh.baby_feed.data.NextFeedingCalculator
-import java.util.concurrent.TimeUnit
+import com.snimesh.baby_feed.settings.SettingsRepository
 
 class FeedWidget : GlanceAppWidget() {
 
@@ -19,11 +19,12 @@ class FeedWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val repository = FeedRepository.getInstance(context)
+        val settingsRepository = SettingsRepository.getInstance(context)
         val mostRecent = repository.mostRecent()
-        // TODO(Unit 6): read the configurable interval from Settings instead of this default.
+        val intervalMillis = settingsRepository.getFeedingIntervalMillis()
         val status = NextFeedingCalculator.calculate(
             lastFeedMillis = mostRecent?.timestampMillis,
-            intervalMillis = DEFAULT_FEEDING_INTERVAL_MILLIS,
+            intervalMillis = intervalMillis,
         )
 
         provideContent {
@@ -35,9 +36,5 @@ class FeedWidget : GlanceAppWidget() {
                 onUndoClick = actionRunCallback<UndoLogAction>(),
             )
         }
-    }
-
-    companion object {
-        val DEFAULT_FEEDING_INTERVAL_MILLIS: Long = TimeUnit.HOURS.toMillis(3)
     }
 }

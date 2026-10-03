@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.snimesh.baby_feed.history.HistoryActivity
+import com.snimesh.baby_feed.settings.SettingsActivity
 import com.snimesh.baby_feed.ui.theme.BabyfeedTheme
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -91,7 +92,9 @@ private fun BackdateScreen(viewModel: BackdateViewModel, modifier: Modifier = Mo
                 Button(onClick = { context.startActivity(Intent(context, HistoryActivity::class.java)) }) {
                     Text("History")
                 }
-                // TODO(Unit 6): navigate to SettingsActivity once it exists.
+                Button(onClick = { context.startActivity(Intent(context, SettingsActivity::class.java)) }) {
+                    Text("Settings")
+                }
             }
 
             is BackdateUiState.Listening -> Text("Listening…")

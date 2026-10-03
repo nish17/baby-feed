@@ -93,6 +93,7 @@ None — this repository is currently empty aside from `docs/brainstorms/` and `
 - **`WidgetActionHandler` holds only repository logic; `LogNowAction`/`UndoLogAction` own the Glance-specific side effects** (`updateAppWidgetState`, `updateAll`): this split is what makes `WidgetActionHandlerTest` a plain JVM test — the Glance state/redraw calls need a real Android/Glance runtime and aren't unit-tested here, consistent with the plan's own note that Glance's testing API doesn't cover real rendering or taps.
 - **History's edit action is a quick "-15m" adjustment button, not a full date/time picker dialog** — same philosophy as the backdating `ManualPicker`'s relative-offset buttons (Unit 3/4): the realistic correction case is "it was logged a bit earlier than it should have been," and a native `DatePickerDialog`/`TimePickerDialog` would need extra View-interop ceremony disproportionate to weekend scope.
 - **ViewModels catch and silently reject a future-timestamp edit/log rather than letting `IllegalArgumentException` propagate**: discovered as a real bug during Unit 5 — the exception is thrown inside a `viewModelScope.launch` coroutine, so a caller's `try/catch` around the ViewModel method call never actually catches it; the ViewModel itself must handle it.
+- **Feeding interval stored via plain `SharedPreferences`, not DataStore**: a single scalar value doesn't need DataStore's heavier API; avoids adding a dependency the rest of the app doesn't otherwise need. Offered as 3 preset options (2h/3h/4h radio buttons) rather than a free-form input, matching weekend-scope simplicity.
 
 ## High-Level Technical Design
 
@@ -414,7 +415,7 @@ This is directional scope, not a constraint — adjust package/file names as imp
 
 ---
 
-- [ ] **Unit 6: Settings — Feeding Interval**
+- [x] **Unit 6: Settings — Feeding Interval**
 
 **Goal:** Let the father configure the interval used to compute "next feeding time," with changes applying live.
 
