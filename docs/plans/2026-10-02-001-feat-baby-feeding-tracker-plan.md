@@ -153,7 +153,7 @@ This is the single source of truth for the backdate flow's sequencing — Unit 4
 
 - Resolved: Glance's public composable API (1.2.0) exposes no `Chronometer` wrapper, and a lower-level RemoteViews interop to reach it would be a disproportionate detour for a weekend build. Unit 2 went straight to the `updateAll()`-on-tap + 15-minute `WorkManager` backstop fallback the plan already named as the contingency.
 - Exact prompt template and output-parsing strategy for the LLM time-extraction step (MediaPipe's `tasks-genai` doesn't support schema-constrained structured output, so the app must parse a free-text model response defensively) — exact prompt wording and validation thresholds are an implementation-time tuning exercise, not a planning decision.
-- Whether on-device speech recognition (`isOnDeviceRecognitionAvailable()`) actually returns `true` on the specific test device, given documented Samsung OEM inconsistency — must be verified against real hardware early in Unit 3, with R11's manual fallback as the expected outcome if it does not.
+- Resolved: `SpeechRecognizer.isOnDeviceRecognitionAvailable()` returns `true` on the development/test device used during implementation (a spare Samsung Galaxy S21, SM-G991B, Android 15 / API 35 — standing in for the father's actual Galaxy S23+ during this build) — verified via a logcat probe before writing the rest of Unit 3. The documented Samsung OEM inconsistency risk doesn't materialize on this device/OS combination; R11's manual picker remains as the fallback regardless, and this should be re-verified on the actual S23+ before considering AI backdating done.
 - Minor edge-case polish not required for a working weekend demo: widget resize/minimum-size layout behavior, system clock-skew/DST handling for the countdown, interval min/max validation bounds, and distinguishing "mic permission denied" from "on-device engine unavailable" in the STT fallback UX (both currently route to the same R11 fallback, which is sufficient for now).
 
 ## Output Structure
@@ -303,7 +303,7 @@ This is directional scope, not a constraint — adjust package/file names as imp
 
 ---
 
-- [ ] **Unit 3: Backdated Entry Capture — On-Device Speech-to-Text + Manual Fallback**
+- [x] **Unit 3: Backdated Entry Capture — On-Device Speech-to-Text + Manual Fallback**
 
 **Goal:** The app-side entry point for logging a past feed: capture either spoken or typed natural language, with a manual date/time-picker fallback when on-device STT isn't available or fails.
 
@@ -339,7 +339,7 @@ This is directional scope, not a constraint — adjust package/file names as imp
 
 ---
 
-- [ ] **Unit 4: On-Device LLM Time Parsing & Confirmation**
+- [x] **Unit 4: On-Device LLM Time Parsing & Confirmation**
 
 **Goal:** Parse the natural-language text from Unit 3 into a timestamp using the on-device Gemma model, with a confirm/undo step before saving.
 
@@ -450,7 +450,8 @@ This is directional scope, not a constraint — adjust package/file names as imp
 |------|------------|
 | MediaPipe `tasks-genai` is deprecated/maintenance-only | Accepted for weekend velocity (user decision); documented migration debt, not a surprise discovered mid-build |
 | Gemma 3 1B model (~529MB) must be manually provisioned via `adb push`, not bundled | Document the one-time push step; detect a missing model file at runtime and fall back to the manual picker instead of crashing |
-| On-device STT (`isOnDeviceRecognitionAvailable`) may report unavailable on this specific Samsung S23+ unit | R11's manual-picker fallback is mandatory, not optional; verify against the real device as the first step of Unit 3, not assumed |
+| On-device STT availability varies by device/OEM/locale | Verified `true` on the Galaxy S21 dev/test device (Android 15); re-verify on the father's actual Galaxy S23+ before calling AI backdating done. R11's manual-picker fallback stays mandatory regardless |
+| Real Gemma inference quality/latency is still unverified | All code paths are built and the model-missing fallback is confirmed working on-device (no crash), but the actual Gemma 3 1B model has not yet been pushed to any test device (needs the HF/Kaggle license click-through + `adb push` — a manual step only the user can do). Speaking/typing real phrasings and confirming correct parses, per Unit 4's Verification, is still outstanding |
 | `AppWidgetManager`'s ~30-min update floor + Samsung's aggressive Doze/battery management could make the countdown/overdue display stale | Immediate `updateAll()` after every log/edit/delete event (not dependent on the periodic cycle) + request a battery-optimization exemption from the father once installed + treat the 15-min `WorkManager` backstop as best-effort |
 | Zero prior Android experience across three unfamiliar technologies (Glance, MediaPipe, SpeechRecognizer) stacked into one weekend | Explicit Priority Order (origin doc): core widget (Units 1-2) first, AI backdating (Units 3-4) second, history/settings (Units 5-6) last and droppable |
 | If Unit 5 (History) is cut, there is no way to fix a confirmed-but-wrong backdated entry discovered after the fact (R3's confirm/undo only catches mistakes at the moment of save) | Accepted as a documented weekend-scope tradeoff (user decision) — not a silent gap; the father would need to know a wrong-but-confirmed entry is uncorrectable until Unit 5 is built |
