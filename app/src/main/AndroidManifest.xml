@@ -16,7 +16,6 @@
         <activity
             android:name=".backdate.BackdateActivity"
             android:exported="true"
-            android:label="@string/app_name"
             android:theme="@style/Theme.Babyfeed"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
