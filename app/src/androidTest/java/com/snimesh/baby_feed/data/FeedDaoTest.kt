@@ -28,7 +28,7 @@ class FeedDaoTest {
         db = Room.inMemoryDatabaseBuilder(context, FeedDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        repository = FeedRepository(db.feedDao())
+        repository = RoomFeedRepository(db.feedDao())
     }
 
     @After

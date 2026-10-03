@@ -89,6 +89,8 @@ None — this repository is currently empty aside from `docs/brainstorms/` and `
 - **The manual date/time-picker path also routes through R3's confirm/undo step before saving**, not directly to the repository. This keeps the undo affordance uniform across every save path (LLM-parsed or manually picked) rather than only protecting the AI-parsed case.
 - **`TimeParsingLlm` (and the ~529MB model it wraps) is an application-scoped singleton, lazily loaded once on first backdate use and kept warm thereafter** — reloading the model per-screen would add several seconds of latency to every single backdating attempt, not just the first.
 - **Non-ViewModel call sites (`LogNowAction`, `WidgetRefreshWorker`) access `FeedRepository` via a lazy singleton accessor keyed on `applicationContext`**, consistent with the "no DI framework" decision above — this is the concrete mechanism behind that decision, not a separate one.
+- **`FeedRepository` is an interface (`RoomFeedRepository` is the real impl)**: implemented during Unit 1, retrofitted to an interface once Unit 2 needed `FakeFeedRepository` for `WidgetActionHandlerTest` — matches the fakeable-interface pattern the plan already specifies for `SpeechCaptureController`/`TimeParsingLlm` in Units 3-4.
+- **`WidgetActionHandler` holds only repository logic; `LogNowAction`/`UndoLogAction` own the Glance-specific side effects** (`updateAppWidgetState`, `updateAll`): this split is what makes `WidgetActionHandlerTest` a plain JVM test — the Glance state/redraw calls need a real Android/Glance runtime and aren't unit-tested here, consistent with the plan's own note that Glance's testing API doesn't cover real rendering or taps.
 
 ## High-Level Technical Design
 
@@ -144,14 +146,15 @@ This is the single source of truth for the backdate flow's sequencing — Unit 4
 - Last-feed-after-edit and interval-change-mid-countdown semantics: resolved as explicit rules above (flagged by flow analysis as previously undefined).
 - STT fail-open vs. fail-closed: fails closed to the manual picker, consistent with the on-device-only privacy requirement.
 - R7 (History) droppability gap: accepted as a documented weekend-scope tradeoff (user decision) rather than making Unit 5 non-droppable or adding a cheaper substitute affordance (see Unit 5 Goal and Risks & Dependencies).
+- `runGlanceAppWidgetUnitTest` does **not** need Robolectric — it fails with "Method putInt in android.os.BaseBundle not mocked" under AGP's default unit-test stubs, but setting `testOptions.unitTests.isReturnDefaultValues = true` in `app/build.gradle.kts` resolved it with no further config.
+- `PreferencesGlanceStateDefinition` lives in `androidx.glance.state`, not `androidx.glance.appwidget.state` (verified against the actual 1.2.0 artifact) — several otherwise-correct-looking docs/blog snippets get this import wrong.
 
 ### Deferred to Implementation
 
-- Whether Glance's current composable set can host a `RemoteViews.Chronometer` directly, or whether a lower-level RemoteViews interop (or the WorkManager-only fallback) is needed — resolve via the Unit 2 spike, not by guessing now.
+- Resolved: Glance's public composable API (1.2.0) exposes no `Chronometer` wrapper, and a lower-level RemoteViews interop to reach it would be a disproportionate detour for a weekend build. Unit 2 went straight to the `updateAll()`-on-tap + 15-minute `WorkManager` backstop fallback the plan already named as the contingency.
 - Exact prompt template and output-parsing strategy for the LLM time-extraction step (MediaPipe's `tasks-genai` doesn't support schema-constrained structured output, so the app must parse a free-text model response defensively) — exact prompt wording and validation thresholds are an implementation-time tuning exercise, not a planning decision.
 - Whether on-device speech recognition (`isOnDeviceRecognitionAvailable()`) actually returns `true` on the specific test device, given documented Samsung OEM inconsistency — must be verified against real hardware early in Unit 3, with R11's manual fallback as the expected outcome if it does not.
 - Minor edge-case polish not required for a working weekend demo: widget resize/minimum-size layout behavior, system clock-skew/DST handling for the countdown, interval min/max validation bounds, and distinguishing "mic permission denied" from "on-device engine unavailable" in the STT fallback UX (both currently route to the same R11 fallback, which is sufficient for now).
-- Whether `runGlanceAppWidgetUnitTest` requires Robolectric configuration (shadowed Android framework classes, `testOptions.unitTests.isIncludeAndroidResources`, first-run SDK jar downloads) for this Glance/AGP version combination — if so, Unit 1 or Unit 2 needs that Gradle config added; if it stalls, fall back to manual verification for `WidgetContentTest` per the test-coverage-is-droppable decision (see Key Technical Decisions).
 
 ## Output Structure
 
@@ -250,7 +253,7 @@ This is directional scope, not a constraint — adjust package/file names as imp
 
 ---
 
-- [ ] **Unit 2: Home-Screen Widget — Log & Display**
+- [x] **Unit 2: Home-Screen Widget — Log & Display**
 
 **Goal:** Ship the widget itself: one-tap logging with undo, and the last-feed/next-feed/countdown/overdue/empty display states.
 

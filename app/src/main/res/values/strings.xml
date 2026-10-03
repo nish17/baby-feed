@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">baby-feed</string>
+    <string name="feed_widget_description">Log a feed and see when the next one is due</string>
 </resources>
