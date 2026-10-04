@@ -1,5 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.Babyfeed" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- Dark parent + matching window/status/nav bar colors avoid a flash of light background
+         before Compose draws the real (dark) theme. -->
+    <style name="Theme.Babyfeed" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/app_background</item>
+        <item name="android:statusBarColor">@color/app_background</item>
+        <item name="android:navigationBarColor">@color/app_background</item>
+    </style>
 </resources>

@@ -7,6 +7,9 @@ import androidx.glance.testing.unit.assertHasText
 import androidx.glance.testing.unit.hasTestTag
 import com.snimesh.baby_feed.data.FeedingStatus
 import org.junit.Test
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 class WidgetContentTest {
 
@@ -28,6 +31,29 @@ class WidgetContentTest {
 
         onNode(hasTestTag("countdown_text")).assertHasText("Next feed in 2h 0m")
         onNode(hasTestTag("log_now_button")).assertHasClickAction()
+    }
+
+    @Test
+    fun countdownRemaining_rendersLastFedTimeInHeader() = runGlanceAppWidgetUnitTest {
+        val lastFeedMillis = 1_700_000_000_000L
+        provideComposable {
+            WidgetContent(
+                state = WidgetUiState(
+                    status = FeedingStatus.CountdownRemaining(
+                        remainingMillis = 2 * 60 * 60 * 1000L,
+                        lastFeedMillis = lastFeedMillis,
+                        nextFeedMillis = 0L,
+                    ),
+                ),
+                onLogClick = actionRunCallback<LogNowAction>(),
+                onUndoClick = actionRunCallback<UndoLogAction>(),
+            )
+        }
+
+        val expectedTime = Instant.ofEpochMilli(lastFeedMillis)
+            .atZone(ZoneId.systemDefault())
+            .format(DateTimeFormatter.ofPattern("h:mm a"))
+        onNode(hasTestTag("last_fed_text")).assertHasText("Last fed $expectedTime")
     }
 
     @Test
